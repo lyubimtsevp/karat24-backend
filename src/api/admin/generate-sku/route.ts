@@ -68,7 +68,7 @@ export async function GET(
     }
     
     // Получаем все товары чтобы найти максимальный номер
-    const { products } = await productService.listProducts(
+    const products = await productService.listProducts(
       {},
       { select: ["id", "metadata"], take: 10000 }
     )
