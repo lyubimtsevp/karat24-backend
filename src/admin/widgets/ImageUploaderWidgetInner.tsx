@@ -6,9 +6,8 @@ import {
   usePrompt,
   Badge,
   IconButton,
-  ProgressBar,
 } from "@medusajs/ui"
-import { XMark, ArrowUpTray, Photo, ArrowUp, ArrowDown } from "@medusajs/icons"
+import { XMark, ArrowUpTray, Photo, ArrowUpMini, ArrowDownMini } from "@medusajs/icons"
 import type { DetailWidgetProps, AdminProduct } from "@medusajs/framework/types"
 import { useState, useCallback, useRef, useEffect } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
@@ -328,7 +327,12 @@ export const ImageUploaderWidgetInner = ({ data: product }: DetailWidgetProps<Ad
               <Text className="text-gray-600">Загрузка и конвертация...</Text>
               <Text className="font-medium">{uploadProgress}%</Text>
             </div>
-            <ProgressBar value={uploadProgress} />
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div 
+                className="bg-amber-500 h-2 rounded-full transition-all duration-300"
+                style={{ width: `${uploadProgress}%` }}
+              />
+            </div>
           </div>
         )}
 
@@ -409,7 +413,7 @@ export const ImageUploaderWidgetInner = ({ data: product }: DetailWidgetProps<Ad
                         }}
                         disabled={index === 0}
                       >
-                        <ArrowUp className="text-white" />
+                        <ArrowUpMini className="text-white" />
                       </IconButton>
                       <IconButton
                         variant="transparent"
@@ -420,7 +424,7 @@ export const ImageUploaderWidgetInner = ({ data: product }: DetailWidgetProps<Ad
                         }}
                         disabled={index === uploadedImages.length - 1}
                       >
-                        <ArrowDown className="text-white" />
+                        <ArrowDownMini className="text-white" />
                       </IconButton>
                       <IconButton
                         variant="transparent"

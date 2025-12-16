@@ -54,46 +54,46 @@ export async function GET(
 ): Promise<void> {
   try {
     const productService = req.scope.resolve(Modules.PRODUCT)
-    
+
     const category = (req.query.category as string)?.toLowerCase() || ""
     const productType = (req.query.product_type as string)?.toLowerCase() || ""
-    
+
     // Определяем префикс
     let prefix = "K24" // По умолчанию КАРАТ 24
-    
+
     if (category && CATEGORY_PREFIXES[category]) {
       prefix = CATEGORY_PREFIXES[category]
     } else if (productType && CATEGORY_PREFIXES[productType]) {
       prefix = CATEGORY_PREFIXES[productType]
     }
-    
+
     // Получаем все товары чтобы найти максимальный номер
     const products = await productService.listProducts(
       {},
       { select: ["id", "metadata"], take: 10000 }
     )
-    
+
     // Ищем максимальный номер для данного префикса
     let maxNumber = 0
-    
+
     for (const product of products) {
       const sku = (product.metadata?.sku_custom as string) || ""
-      
+
       if (sku.startsWith(prefix + "-")) {
         const numPart = sku.replace(prefix + "-", "")
         const num = parseInt(numPart, 10)
-        
+
         if (!isNaN(num) && num > maxNumber) {
           maxNumber = num
         }
       }
     }
-    
+
     // Генерируем новый артикул
     const nextNumber = maxNumber + 1
     const paddedNumber = nextNumber.toString().padStart(4, "0")
     const generatedSku = `${prefix}-${paddedNumber}`
-    
+
     res.status(200).json({
       sku: generatedSku,
       prefix,
