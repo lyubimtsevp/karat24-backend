@@ -19,6 +19,28 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 // =====================================================
 // ТИПЫ для ювелирных метаданных по ТЗ (24 поля)
 // =====================================================
+
+// Тип для одного металла в изделии
+interface MetalEntry {
+  id: string
+  type: string
+  color: string
+  purity: string
+  weight: string
+}
+
+// Тип для одного камня в изделии
+interface GemstoneEntry {
+  id: string
+  name: string
+  type: string // природный/синтетический/имитация
+  cut: string // форма огранки
+  weight: string // вес в каратах
+  color: string
+  clarity: string // чистота (D/VVS1 и т.д.)
+  count: string // количество
+}
+
 interface JewelryMetadata {
   // 1. Наименование - уже есть в product.title
   // 1.1 Расширенный заголовок
@@ -38,7 +60,9 @@ interface JewelryMetadata {
   
   // 4. Категория/раздел - уже есть в Medusa categories
   
-  // 5. Драгоценный металл
+  // 5. Драгоценные металлы (массив для нескольких)
+  metals?: string // JSON массив MetalEntry[]
+  // Для обратной совместимости
   metal_type?: string
   metal_color?: string
   
@@ -48,7 +72,9 @@ interface JewelryMetadata {
   // 7. Вес изделия (грамм)
   average_weight?: string
   
-  // 8. Вставка/камни
+  // 8. Вставки/камни (массив для нескольких)
+  gemstones?: string // JSON массив GemstoneEntry[]
+  // Для обратной совместимости
   gemstone?: string
   gemstone_type?: string // природный/синтетический/имитация
   gemstone_cut?: string // форма огранки
@@ -398,6 +424,49 @@ export const JewelryFieldsWidgetInner = ({ data: product }: DetailWidgetProps<Ad
     currentMetadata.available_sizes ? currentMetadata.available_sizes.split(",") : []
   )
   
+  // Массив металлов
+  const [metals, setMetals] = useState<MetalEntry[]>(() => {
+    if (currentMetadata.metals) {
+      try {
+        return JSON.parse(currentMetadata.metals)
+      } catch { return [] }
+    }
+    // Миграция со старого формата
+    if (currentMetadata.metal_type) {
+      return [{
+        id: "1",
+        type: currentMetadata.metal_type || "",
+        color: currentMetadata.metal_color || "",
+        purity: currentMetadata.metal_purity || "",
+        weight: currentMetadata.average_weight || "",
+      }]
+    }
+    return []
+  })
+  
+  // Массив камней
+  const [gemstones, setGemstones] = useState<GemstoneEntry[]>(() => {
+    if (currentMetadata.gemstones) {
+      try {
+        return JSON.parse(currentMetadata.gemstones)
+      } catch { return [] }
+    }
+    // Миграция со старого формата
+    if (currentMetadata.gemstone) {
+      return [{
+        id: "1",
+        name: currentMetadata.gemstone || "",
+        type: currentMetadata.gemstone_type || "",
+        cut: currentMetadata.gemstone_cut || "",
+        weight: currentMetadata.gemstone_weight || "",
+        color: currentMetadata.gemstone_color || "",
+        clarity: currentMetadata.gemstone_clarity || "",
+        count: currentMetadata.gemstone_count || "",
+      }]
+    }
+    return []
+  })
+  
   const [isDirty, setIsDirty] = useState(false)
 
   // Определяем пробы в зависимости от металла
@@ -472,7 +541,9 @@ export const JewelryFieldsWidgetInner = ({ data: product }: DetailWidgetProps<Ad
   }, [product.id])
 
   const { mutate: updateProduct, isPending: isUpdating } = useMutation({
-    mutationFn: async (metadata: JewelryMetadata) => {
+    mutationFn: async (data: { metadata: JewelryMetadata, metals: MetalEntry[], gemstones: GemstoneEntry[] }) => {
+      const { metadata, metals: metalsList, gemstones: gemstonesList } = data
+      
       // Добавляем запись в историю изменений
       const existingHistory = product.metadata?.edit_history 
         ? JSON.parse(product.metadata.edit_history as string)
@@ -486,6 +557,9 @@ export const JewelryFieldsWidgetInner = ({ data: product }: DetailWidgetProps<Ad
       
       const updatedHistory = [newHistoryEntry, ...existingHistory].slice(0, 50) // Храним последние 50 записей
       
+      // Вычисляем общий вес из металлов
+      const totalWeight = metalsList.reduce((sum, m) => sum + (parseFloat(m.weight) || 0), 0)
+      
       const res = await fetch(`/admin/products/${product.id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -493,6 +567,22 @@ export const JewelryFieldsWidgetInner = ({ data: product }: DetailWidgetProps<Ad
           metadata: { 
             ...product.metadata, 
             ...metadata,
+            // Сохраняем массивы как JSON строки
+            metals: JSON.stringify(metalsList),
+            gemstones: JSON.stringify(gemstonesList),
+            // Для обратной совместимости сохраняем первый металл/камень в старые поля
+            metal_type: metalsList[0]?.type || metadata.metal_type,
+            metal_color: metalsList[0]?.color || metadata.metal_color,
+            metal_purity: metalsList[0]?.purity || metadata.metal_purity,
+            average_weight: totalWeight > 0 ? totalWeight.toFixed(2) : metadata.average_weight,
+            gemstone: gemstonesList[0]?.name || metadata.gemstone,
+            gemstone_type: gemstonesList[0]?.type || metadata.gemstone_type,
+            gemstone_cut: gemstonesList[0]?.cut || metadata.gemstone_cut,
+            gemstone_weight: gemstonesList[0]?.weight || metadata.gemstone_weight,
+            gemstone_color: gemstonesList[0]?.color || metadata.gemstone_color,
+            gemstone_clarity: gemstonesList[0]?.clarity || metadata.gemstone_clarity,
+            gemstone_count: gemstonesList[0]?.count || metadata.gemstone_count,
+            // История
             edit_history: JSON.stringify(updatedHistory),
             last_editor: metadata.responsible_manager,
             last_edit_date: new Date().toISOString(),
@@ -527,18 +617,91 @@ export const JewelryFieldsWidgetInner = ({ data: product }: DetailWidgetProps<Ad
       return newSizes
     })
   }
-
-  const handleSave = () => {
-    updateProduct(formData)
+  
+  // === УПРАВЛЕНИЕ МЕТАЛЛАМИ ===
+  const addMetal = () => {
+    const newMetal: MetalEntry = {
+      id: Date.now().toString(),
+      type: "gold",
+      color: "yellow",
+      purity: "585",
+      weight: "",
+    }
+    setMetals(prev => [...prev, newMetal])
+    setIsDirty(true)
+  }
+  
+  const removeMetal = (id: string) => {
+    setMetals(prev => prev.filter(m => m.id !== id))
+    setIsDirty(true)
+  }
+  
+  const updateMetal = (id: string, field: keyof MetalEntry, value: string) => {
+    setMetals(prev => prev.map(m => m.id === id ? { ...m, [field]: value } : m))
+    setIsDirty(true)
+  }
+  
+  // === УПРАВЛЕНИЕ КАМНЯМИ ===
+  const addGemstone = () => {
+    const newGemstone: GemstoneEntry = {
+      id: Date.now().toString(),
+      name: "",
+      type: "natural",
+      cut: "round",
+      weight: "",
+      color: "",
+      clarity: "",
+      count: "1",
+    }
+    setGemstones(prev => [...prev, newGemstone])
+    setIsDirty(true)
+  }
+  
+  const removeGemstone = (id: string) => {
+    setGemstones(prev => prev.filter(g => g.id !== id))
+    setIsDirty(true)
+  }
+  
+  const updateGemstone = (id: string, field: keyof GemstoneEntry, value: string) => {
+    setGemstones(prev => prev.map(g => g.id === id ? { ...g, [field]: value } : g))
+    setIsDirty(true)
   }
 
-  // Генерация артикула
-  const generateSku = () => {
-    const prefix = formData.product_type ? formData.product_type.substring(0, 2).toUpperCase() : "XX"
-    const metal = formData.metal_type ? formData.metal_type.substring(0, 1).toUpperCase() : "X"
-    const random = Math.floor(Math.random() * 10000).toString().padStart(4, "0")
-    const sku = `K24-${prefix}${metal}-${random}`
-    handleInputChange("sku_custom", sku)
+  const handleSave = () => {
+    updateProduct({ metadata: formData, metals, gemstones })
+  }
+
+  // Генерация артикула через API
+  const [isGeneratingSku, setIsGeneratingSku] = useState(false)
+  
+  const generateSku = async () => {
+    setIsGeneratingSku(true)
+    try {
+      const params = new URLSearchParams()
+      if (formData.product_type) {
+        params.set("product_type", formData.product_type)
+      }
+      
+      const res = await fetch(`/admin/generate-sku?${params.toString()}`)
+      if (res.ok) {
+        const data = await res.json()
+        handleInputChange("sku_custom", data.sku)
+        prompt({
+          title: "Артикул сгенерирован",
+          description: `${data.sku} (${data.prefix}, #${data.number})`,
+        })
+      } else {
+        throw new Error("Ошибка генерации")
+      }
+    } catch (error) {
+      // Fallback на локальную генерацию
+      const prefix = formData.product_type ? formData.product_type.substring(0, 2).toUpperCase() : "XX"
+      const metal = formData.metal_type ? formData.metal_type.substring(0, 1).toUpperCase() : "X"
+      const random = Math.floor(Math.random() * 10000).toString().padStart(4, "0")
+      const sku = `K24-${prefix}${metal}-${random}`
+      handleInputChange("sku_custom", sku)
+    }
+    setIsGeneratingSku(false)
   }
 
   return (
@@ -573,8 +736,13 @@ export const JewelryFieldsWidgetInner = ({ data: product }: DetailWidgetProps<Ad
                       value={formData.sku_custom}
                       onChange={(e) => handleInputChange("sku_custom", e.target.value)}
                     />
-                    <Button variant="secondary" onClick={generateSku} type="button">
-                      Сгенерировать
+                    <Button 
+                      variant="secondary" 
+                      onClick={generateSku} 
+                      type="button"
+                      isLoading={isGeneratingSku}
+                    >
+                      🔄 Сгенерировать
                     </Button>
                   </div>
                   <Text className="text-ui-fg-muted text-xs mt-1">
@@ -670,217 +838,276 @@ export const JewelryFieldsWidgetInner = ({ data: product }: DetailWidgetProps<Ad
             </div>
           </Tabs.Content>
 
-          {/* ==================== МЕТАЛЛ ==================== */}
+          {/* ==================== МЕТАЛЛЫ (несколько) ==================== */}
           <Tabs.Content value="metal" className="pt-4">
             <div className="flex flex-col gap-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <Label>5. Тип металла *</Label>
-                  <Select
-                    value={formData.metal_type}
-                    onValueChange={(v) => {
-                      handleInputChange("metal_type", v)
-                      // Сбросить пробу при смене металла
-                      handleInputChange("metal_purity", "")
-                    }}
-                  >
-                    <Select.Trigger>
-                      <Select.Value placeholder="Выберите металл" />
-                    </Select.Trigger>
-                    <Select.Content>
-                      {METAL_TYPE_OPTIONS.map((opt) => (
-                        <Select.Item key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </Select.Item>
-                      ))}
-                    </Select.Content>
-                  </Select>
+              <div className="flex items-center justify-between">
+                <Label className="text-base">5. Драгоценные металлы</Label>
+                <Button variant="secondary" size="small" onClick={addMetal}>
+                  + Добавить металл
+                </Button>
+              </div>
+              
+              {metals.length === 0 ? (
+                <div className="p-4 border-2 border-dashed rounded-lg text-center text-ui-fg-muted">
+                  Нажмите "Добавить металл" для добавления
                 </div>
-
-                {showMetalColor && (
-                  <div>
-                    <Label>Цвет металла</Label>
-                    <Select
-                      value={formData.metal_color}
-                      onValueChange={(v) => handleInputChange("metal_color", v)}
-                    >
-                      <Select.Trigger>
-                        <Select.Value placeholder="Выберите цвет" />
-                      </Select.Trigger>
-                      <Select.Content>
-                        {METAL_COLOR_OPTIONS.map((opt) => (
-                          <Select.Item key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </Select.Item>
-                        ))}
-                      </Select.Content>
-                    </Select>
-                  </div>
-                )}
-
-                <div>
-                  <Label>6. Проба *</Label>
-                  <Select
-                    value={formData.metal_purity}
-                    onValueChange={(v) => handleInputChange("metal_purity", v)}
-                  >
-                    <Select.Trigger>
-                      <Select.Value placeholder="Выберите пробу" />
-                    </Select.Trigger>
-                    <Select.Content>
-                      {getPurityOptions().map((opt) => (
-                        <Select.Item key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </Select.Item>
-                      ))}
-                    </Select.Content>
-                  </Select>
+              ) : (
+                <div className="space-y-3">
+                  {metals.map((metal, idx) => (
+                    <div key={metal.id} className="p-3 border rounded-lg bg-ui-bg-subtle">
+                      <div className="flex items-center justify-between mb-2">
+                        <Badge color="purple">Металл #{idx + 1}</Badge>
+                        <Button 
+                          variant="danger" 
+                          size="small" 
+                          onClick={() => removeMetal(metal.id)}
+                        >
+                          Удалить
+                        </Button>
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        <div>
+                          <Label className="text-xs">Тип</Label>
+                          <Select
+                            value={metal.type}
+                            onValueChange={(v) => updateMetal(metal.id, "type", v)}
+                          >
+                            <Select.Trigger>
+                              <Select.Value />
+                            </Select.Trigger>
+                            <Select.Content>
+                              {METAL_TYPE_OPTIONS.filter(o => o.value).map((opt) => (
+                                <Select.Item key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </Select.Item>
+                              ))}
+                            </Select.Content>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label className="text-xs">Цвет</Label>
+                          <Select
+                            value={metal.color}
+                            onValueChange={(v) => updateMetal(metal.id, "color", v)}
+                          >
+                            <Select.Trigger>
+                              <Select.Value />
+                            </Select.Trigger>
+                            <Select.Content>
+                              {METAL_COLOR_OPTIONS.filter(o => o.value).map((opt) => (
+                                <Select.Item key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </Select.Item>
+                              ))}
+                            </Select.Content>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label className="text-xs">Проба</Label>
+                          <Select
+                            value={metal.purity}
+                            onValueChange={(v) => updateMetal(metal.id, "purity", v)}
+                          >
+                            <Select.Trigger>
+                              <Select.Value />
+                            </Select.Trigger>
+                            <Select.Content>
+                              {(metal.type === "gold" ? GOLD_PURITY_OPTIONS :
+                                metal.type === "silver" ? SILVER_PURITY_OPTIONS :
+                                metal.type === "platinum" ? PLATINUM_PURITY_OPTIONS :
+                                metal.type === "palladium" ? PALLADIUM_PURITY_OPTIONS :
+                                GOLD_PURITY_OPTIONS).filter(o => o.value).map((opt) => (
+                                <Select.Item key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </Select.Item>
+                              ))}
+                            </Select.Content>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label className="text-xs">Вес (г)</Label>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            placeholder="3.25"
+                            value={metal.weight}
+                            onChange={(e) => updateMetal(metal.id, "weight", e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              
+              {/* Общий вес */}
+              <div className="p-3 bg-amber-50 rounded-lg border border-amber-200">
+                <div className="flex items-center justify-between">
+                  <Text className="text-amber-800 font-medium">Общий вес металлов:</Text>
+                  <Text className="text-amber-900 font-bold text-lg">
+                    {metals.reduce((sum, m) => sum + (parseFloat(m.weight) || 0), 0).toFixed(2)} г
+                  </Text>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label>7. Вес изделия (г) *</Label>
-                  <Input
-                    type="text"
-                    placeholder="3.25"
-                    value={formData.average_weight}
-                    onChange={(e) => handleInputChange("average_weight", e.target.value)}
-                  />
-                  <Text className="text-ui-fg-muted text-xs mt-1">
-                    С точностью до 2 знаков после запятой
-                  </Text>
-                </div>
-
-                <div>
-                  <Label>10. Покрытие</Label>
-                  <Select
-                    value={formData.coating}
-                    onValueChange={(v) => handleInputChange("coating", v)}
-                  >
-                    <Select.Trigger>
-                      <Select.Value placeholder="Выберите покрытие" />
-                    </Select.Trigger>
-                    <Select.Content>
-                      {COATING_OPTIONS.map((opt) => (
-                        <Select.Item key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </Select.Item>
-                      ))}
-                    </Select.Content>
-                  </Select>
-                </div>
+              <div>
+                <Label>10. Покрытие</Label>
+                <Select
+                  value={formData.coating}
+                  onValueChange={(v) => handleInputChange("coating", v)}
+                >
+                  <Select.Trigger>
+                    <Select.Value placeholder="Выберите покрытие" />
+                  </Select.Trigger>
+                  <Select.Content>
+                    {COATING_OPTIONS.map((opt) => (
+                      <Select.Item key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </Select.Item>
+                    ))}
+                  </Select.Content>
+                </Select>
               </div>
             </div>
           </Tabs.Content>
 
           {/* ==================== КАМНИ ==================== */}
+          {/* ==================== КАМНИ (несколько) ==================== */}
           <Tabs.Content value="stones" className="pt-4">
             <div className="flex flex-col gap-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <Label>8. Вставка/камни</Label>
-                  <Select
-                    value={formData.gemstone}
-                    onValueChange={(v) => handleInputChange("gemstone", v)}
-                  >
-                    <Select.Trigger>
-                      <Select.Value placeholder="Выберите камень" />
-                    </Select.Trigger>
-                    <Select.Content>
-                      {GEMSTONE_OPTIONS.map((opt) => (
-                        <Select.Item key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </Select.Item>
-                      ))}
-                    </Select.Content>
-                  </Select>
-                </div>
-
-                {showGemstoneFields && (
-                  <>
-                    <div>
-                      <Label>Тип камня</Label>
-                      <Select
-                        value={formData.gemstone_type}
-                        onValueChange={(v) => handleInputChange("gemstone_type", v)}
-                      >
-                        <Select.Trigger>
-                          <Select.Value placeholder="Выберите тип" />
-                        </Select.Trigger>
-                        <Select.Content>
-                          {GEMSTONE_TYPE_OPTIONS.map((opt) => (
-                            <Select.Item key={opt.value} value={opt.value}>
-                              {opt.label}
-                            </Select.Item>
-                          ))}
-                        </Select.Content>
-                      </Select>
-                    </div>
-
-                    <div>
-                      <Label>Форма огранки</Label>
-                      <Select
-                        value={formData.gemstone_cut}
-                        onValueChange={(v) => handleInputChange("gemstone_cut", v)}
-                      >
-                        <Select.Trigger>
-                          <Select.Value placeholder="Выберите огранку" />
-                        </Select.Trigger>
-                        <Select.Content>
-                          {GEMSTONE_CUT_OPTIONS.map((opt) => (
-                            <Select.Item key={opt.value} value={opt.value}>
-                              {opt.label}
-                            </Select.Item>
-                          ))}
-                        </Select.Content>
-                      </Select>
-                    </div>
-                  </>
-                )}
+              <div className="flex items-center justify-between">
+                <Label className="text-base">8. Вставки/камни</Label>
+                <Button variant="secondary" size="small" onClick={addGemstone}>
+                  + Добавить камень
+                </Button>
               </div>
-
-              {showGemstoneFields && (
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <div>
-                    <Label>Вес (карат)</Label>
-                    <Input
-                      type="text"
-                      placeholder="0.5"
-                      value={formData.gemstone_weight}
-                      onChange={(e) => handleInputChange("gemstone_weight", e.target.value)}
-                    />
-                  </div>
-
-                  <div>
-                    <Label>Цвет</Label>
-                    <Input
-                      type="text"
-                      placeholder="D, E, F..."
-                      value={formData.gemstone_color}
-                      onChange={(e) => handleInputChange("gemstone_color", e.target.value)}
-                    />
-                  </div>
-
-                  <div>
-                    <Label>Чистота</Label>
-                    <Input
-                      type="text"
-                      placeholder="VVS1, VS2..."
-                      value={formData.gemstone_clarity}
-                      onChange={(e) => handleInputChange("gemstone_clarity", e.target.value)}
-                    />
-                  </div>
-
-                  <div>
-                    <Label>Количество</Label>
-                    <Input
-                      type="text"
-                      placeholder="1"
-                      value={formData.gemstone_count}
-                      onChange={(e) => handleInputChange("gemstone_count", e.target.value)}
-                    />
-                  </div>
+              
+              {gemstones.length === 0 ? (
+                <div className="p-4 border-2 border-dashed rounded-lg text-center text-ui-fg-muted">
+                  Нажмите "Добавить камень" для добавления
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {gemstones.map((gem, idx) => (
+                    <div key={gem.id} className="p-3 border rounded-lg bg-ui-bg-subtle">
+                      <div className="flex items-center justify-between mb-2">
+                        <Badge color="blue">Камень #{idx + 1}</Badge>
+                        <Button 
+                          variant="danger" 
+                          size="small" 
+                          onClick={() => removeGemstone(gem.id)}
+                        >
+                          Удалить
+                        </Button>
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-2">
+                        <div>
+                          <Label className="text-xs">Название</Label>
+                          <Select
+                            value={gem.name}
+                            onValueChange={(v) => updateGemstone(gem.id, "name", v)}
+                          >
+                            <Select.Trigger>
+                              <Select.Value placeholder="Камень" />
+                            </Select.Trigger>
+                            <Select.Content>
+                              {GEMSTONE_OPTIONS.filter(o => o.value).map((opt) => (
+                                <Select.Item key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </Select.Item>
+                              ))}
+                            </Select.Content>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label className="text-xs">Тип</Label>
+                          <Select
+                            value={gem.type}
+                            onValueChange={(v) => updateGemstone(gem.id, "type", v)}
+                          >
+                            <Select.Trigger>
+                              <Select.Value />
+                            </Select.Trigger>
+                            <Select.Content>
+                              {GEMSTONE_TYPE_OPTIONS.filter(o => o.value).map((opt) => (
+                                <Select.Item key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </Select.Item>
+                              ))}
+                            </Select.Content>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label className="text-xs">Огранка</Label>
+                          <Select
+                            value={gem.cut}
+                            onValueChange={(v) => updateGemstone(gem.id, "cut", v)}
+                          >
+                            <Select.Trigger>
+                              <Select.Value />
+                            </Select.Trigger>
+                            <Select.Content>
+                              {GEMSTONE_CUT_OPTIONS.filter(o => o.value).map((opt) => (
+                                <Select.Item key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </Select.Item>
+                              ))}
+                            </Select.Content>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label className="text-xs">Кол-во</Label>
+                          <Input
+                            type="number"
+                            placeholder="1"
+                            value={gem.count}
+                            onChange={(e) => updateGemstone(gem.id, "count", e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <Label className="text-xs">Вес (карат)</Label>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            placeholder="0.5"
+                            value={gem.weight}
+                            onChange={(e) => updateGemstone(gem.id, "weight", e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs">Цвет</Label>
+                          <Input
+                            type="text"
+                            placeholder="D, E, F..."
+                            value={gem.color}
+                            onChange={(e) => updateGemstone(gem.id, "color", e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs">Чистота</Label>
+                          <Input
+                            type="text"
+                            placeholder="VVS1, VS2..."
+                            value={gem.clarity}
+                            onChange={(e) => updateGemstone(gem.id, "clarity", e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              
+              {/* Сводка по камням */}
+              {gemstones.length > 0 && (
+                <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+                  <Text className="text-blue-800 font-medium">
+                    Всего камней: {gemstones.reduce((sum, g) => sum + (parseInt(g.count) || 0), 0)} шт. | 
+                    Общий вес: {gemstones.reduce((sum, g) => sum + (parseFloat(g.weight) || 0), 0).toFixed(2)} карат
+                  </Text>
                 </div>
               )}
             </div>

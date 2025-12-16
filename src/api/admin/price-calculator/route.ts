@@ -1,11 +1,11 @@
 import { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
+import { getSheetRates, clearRatesCache } from "../../../utils/google-sheets"
 
 /**
- * Курсы металлов (₽ за грамм)
- * В реальном проекте это будет загружаться из Google Sheets
- * Формула: цена = вес × курс_металла × коэффициент_пробы
+ * Локальные курсы металлов (₽ за грамм)
+ * Используются как fallback если Google Sheets недоступен
  */
-const METAL_RATES: Record<string, number> = {
+const LOCAL_METAL_RATES: Record<string, number> = {
     // Золото (базовая цена за грамм 999 пробы)
     "gold_999": 7500,
     "gold_958": 7200,
@@ -37,8 +37,8 @@ const METAL_RATES: Record<string, number> = {
     "palladium_500": 2300,
 }
 
-// Наценки для камней (₽ за карат)
-const GEMSTONE_RATES: Record<string, number> = {
+// Локальные наценки для камней (₽ за карат)
+const LOCAL_GEMSTONE_RATES: Record<string, number> = {
     "diamond": 150000,
     "ruby": 80000,
     "sapphire": 60000,
@@ -92,6 +92,53 @@ interface PriceResponse {
         gemstone_rate: number
         work_coefficient: number
     }
+    source: string // "google_sheets" или "local"
+}
+
+/**
+ * Получить курс металла (из Google Sheets или локальный)
+ */
+async function getMetalRate(metalType: string, purity: string): Promise<{ rate: number; source: string }> {
+    const localKey = `${metalType}_${purity}`
+    
+    try {
+        const sheetRates = await getSheetRates()
+        
+        if (sheetRates.last_updated !== "local") {
+            const sheetRate = sheetRates.metals.find(
+                m => m.metal === metalType && m.purity === purity
+            )
+            if (sheetRate) {
+                return { rate: sheetRate.price_per_gram, source: "google_sheets" }
+            }
+        }
+    } catch (error) {
+        console.warn("Ошибка получения курсов из Google Sheets, используем локальные:", error)
+    }
+    
+    return { rate: LOCAL_METAL_RATES[localKey] || 0, source: "local" }
+}
+
+/**
+ * Получить курс камня (из Google Sheets или локальный)
+ */
+async function getGemstoneRate(gemstone: string): Promise<{ rate: number; source: string }> {
+    try {
+        const sheetRates = await getSheetRates()
+        
+        if (sheetRates.last_updated !== "local") {
+            const sheetRate = sheetRates.gemstones.find(
+                g => g.name === gemstone.toLowerCase()
+            )
+            if (sheetRate) {
+                return { rate: sheetRate.price_per_carat, source: "google_sheets" }
+            }
+        }
+    } catch (error) {
+        console.warn("Ошибка получения курсов камней из Google Sheets, используем локальные:", error)
+    }
+    
+    return { rate: LOCAL_GEMSTONE_RATES[gemstone] || 0, source: "local" }
 }
 
 /**
@@ -124,13 +171,12 @@ export async function POST(
         }
 
         // Получаем курс металла
-        const metalKey = `${metal_type}_${metal_purity}`
-        const metalRate = METAL_RATES[metalKey] || 0
+        const { rate: metalRate, source: metalSource } = await getMetalRate(metal_type, metal_purity)
 
         if (metalRate === 0) {
             res.status(400).json({
-                message: `Неизвестная комбинация металла: ${metalKey}`,
-                available_metals: Object.keys(METAL_RATES),
+                message: `Неизвестная комбинация металла: ${metal_type}_${metal_purity}`,
+                available_metals: Object.keys(LOCAL_METAL_RATES),
             })
             return
         }
@@ -139,7 +185,13 @@ export async function POST(
         const metalCost = weight * metalRate
 
         // Стоимость камня
-        const gemstoneRate = gemstone ? (GEMSTONE_RATES[gemstone] || 0) : 0
+        let gemstoneRate = 0
+        let gemstoneSource = "local"
+        if (gemstone) {
+            const gemResult = await getGemstoneRate(gemstone)
+            gemstoneRate = gemResult.rate
+            gemstoneSource = gemResult.source
+        }
         const gemstoneCost = gemstone_weight * gemstoneRate
 
         // Коэффициент работы
@@ -166,6 +218,7 @@ export async function POST(
                 gemstone_rate: gemstoneRate,
                 work_coefficient: workCoefficient,
             },
+            source: metalSource === "google_sheets" ? "google_sheets" : "local",
         }
 
         res.status(200).json(response)
@@ -180,18 +233,62 @@ export async function POST(
 
 /**
  * GET /admin/price-calculator
- * Получить текущие курсы металлов
+ * Получить текущие курсы металлов (из Google Sheets если настроено)
  */
 export async function GET(
     req: MedusaRequest,
     res: MedusaResponse
 ): Promise<void> {
-    res.status(200).json({
-        metal_rates: METAL_RATES,
-        gemstone_rates: GEMSTONE_RATES,
-        work_coefficients: WORK_COEFFICIENTS,
-        updated_at: new Date().toISOString(),
-        note: "Курсы обновляются из Google Sheets (настроить GOOGLE_SHEETS_ID в .env)",
-    })
+    try {
+        const sheetRates = await getSheetRates()
+        
+        // Преобразуем массив в объект для удобства
+        const metalRates: Record<string, number> = {}
+        const gemstoneRates: Record<string, number> = {}
+        
+        if (sheetRates.last_updated !== "local") {
+            for (const m of sheetRates.metals) {
+                metalRates[`${m.metal}_${m.purity}`] = m.price_per_gram
+            }
+            for (const g of sheetRates.gemstones) {
+                gemstoneRates[g.name] = g.price_per_carat
+            }
+        }
+        
+        res.status(200).json({
+            metal_rates: Object.keys(metalRates).length > 0 ? metalRates : LOCAL_METAL_RATES,
+            gemstone_rates: Object.keys(gemstoneRates).length > 0 ? gemstoneRates : LOCAL_GEMSTONE_RATES,
+            work_coefficients: WORK_COEFFICIENTS,
+            source: sheetRates.last_updated !== "local" ? "google_sheets" : "local",
+            updated_at: sheetRates.last_updated || new Date().toISOString(),
+            config: {
+                sheets_id_configured: !!process.env.GOOGLE_SHEETS_ID,
+                instruction: "Для работы с Google Sheets установите GOOGLE_SHEETS_ID в переменных окружения",
+            },
+        })
+    } catch (error) {
+        console.error("Error fetching rates:", error)
+        res.status(200).json({
+            metal_rates: LOCAL_METAL_RATES,
+            gemstone_rates: LOCAL_GEMSTONE_RATES,
+            work_coefficients: WORK_COEFFICIENTS,
+            source: "local",
+            updated_at: new Date().toISOString(),
+            error: "Не удалось загрузить курсы из Google Sheets",
+        })
+    }
 }
 
+/**
+ * DELETE /admin/price-calculator
+ * Сбросить кэш курсов
+ */
+export async function DELETE(
+    req: MedusaRequest,
+    res: MedusaResponse
+): Promise<void> {
+    clearRatesCache()
+    res.status(200).json({
+        message: "Кэш курсов сброшен",
+    })
+}
