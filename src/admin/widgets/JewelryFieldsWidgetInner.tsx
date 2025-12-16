@@ -62,6 +62,16 @@ interface JewelryMetadata {
   chain_length?: string // для цепочек/браслетов
   earring_dimensions?: string // для серёг
   
+  // 9.1 Плетение (для цепочек)
+  chain_weave?: string
+  
+  // 9.2 Звенья браслета
+  bracelet_links?: string // кол-во звеньев
+  link_weight?: string // вес одного звена
+  
+  // 9.3 Таблица размер → вес
+  weight_by_size?: string // JSON: {"16": 3.5, "17": 3.8, ...}
+  
   // 10. Покрытие
   coating?: string
   
@@ -234,6 +244,27 @@ const GEMSTONE_CUT_OPTIONS = [
   { value: "cabochon", label: "Кабошон" },
 ]
 
+// Плетение для цепочек
+const CHAIN_WEAVE_OPTIONS = [
+  { value: "", label: "Не указано" },
+  { value: "bismarck", label: "Бисмарк" },
+  { value: "anchor", label: "Якорное" },
+  { value: "armor", label: "Панцирное" },
+  { value: "rope", label: "Верёвочка (корда)" },
+  { value: "snake", label: "Снейк (змейка)" },
+  { value: "figaro", label: "Фигаро" },
+  { value: "venetian", label: "Венецианское" },
+  { value: "singapore", label: "Сингапур" },
+  { value: "curb", label: "Картье" },
+  { value: "love", label: "Лав" },
+  { value: "rombo", label: "Ромбо" },
+  { value: "nonna", label: "Нонна" },
+  { value: "wheat", label: "Колос" },
+  { value: "box", label: "Венецианка (коробочка)" },
+  { value: "ball", label: "Шарики (перлина)" },
+  { value: "other", label: "Другое" },
+]
+
 // 10. Покрытие
 const COATING_OPTIONS = [
   { value: "", label: "Без покрытия" },
@@ -345,6 +376,10 @@ export const JewelryFieldsWidgetInner = ({ data: product }: DetailWidgetProps<Ad
     available_sizes: currentMetadata.available_sizes || "",
     chain_length: currentMetadata.chain_length || "",
     earring_dimensions: currentMetadata.earring_dimensions || "",
+    chain_weave: currentMetadata.chain_weave || "",
+    bracelet_links: currentMetadata.bracelet_links || "",
+    link_weight: currentMetadata.link_weight || "",
+    weight_by_size: currentMetadata.weight_by_size || "",
     coating: currentMetadata.coating || "",
     design_style: currentMetadata.design_style || "",
     packaging: currentMetadata.packaging || "",
@@ -413,6 +448,10 @@ export const JewelryFieldsWidgetInner = ({ data: product }: DetailWidgetProps<Ad
       available_sizes: currentMetadata.available_sizes || "",
       chain_length: currentMetadata.chain_length || "",
       earring_dimensions: currentMetadata.earring_dimensions || "",
+      chain_weave: currentMetadata.chain_weave || "",
+      bracelet_links: currentMetadata.bracelet_links || "",
+      link_weight: currentMetadata.link_weight || "",
+      weight_by_size: currentMetadata.weight_by_size || "",
       coating: currentMetadata.coating || "",
       design_style: currentMetadata.design_style || "",
       packaging: currentMetadata.packaging || "",
@@ -434,11 +473,30 @@ export const JewelryFieldsWidgetInner = ({ data: product }: DetailWidgetProps<Ad
 
   const { mutate: updateProduct, isPending: isUpdating } = useMutation({
     mutationFn: async (metadata: JewelryMetadata) => {
+      // Добавляем запись в историю изменений
+      const existingHistory = product.metadata?.edit_history 
+        ? JSON.parse(product.metadata.edit_history as string)
+        : []
+      
+      const newHistoryEntry = {
+        date: new Date().toISOString(),
+        manager: metadata.responsible_manager || "Не указан",
+        action: existingHistory.length === 0 ? "created" : "updated",
+      }
+      
+      const updatedHistory = [newHistoryEntry, ...existingHistory].slice(0, 50) // Храним последние 50 записей
+      
       const res = await fetch(`/admin/products/${product.id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          metadata: { ...product.metadata, ...metadata },
+          metadata: { 
+            ...product.metadata, 
+            ...metadata,
+            edit_history: JSON.stringify(updatedHistory),
+            last_editor: metadata.responsible_manager,
+            last_edit_date: new Date().toISOString(),
+          },
         }),
       })
       if (!res.ok) throw new Error("Failed to update product metadata")
@@ -860,31 +918,119 @@ export const JewelryFieldsWidgetInner = ({ data: product }: DetailWidgetProps<Ad
                       Выбрано: {selectedSizes.join(", ")}
                     </Text>
                   )}
+                  
+                  {/* Таблица размер → вес */}
+                  {selectedSizes.length > 0 && (
+                    <div className="mt-4 p-3 bg-amber-50 rounded-lg border border-amber-200">
+                      <Label className="text-amber-800">Таблица размер → вес (г)</Label>
+                      <Text className="text-xs text-amber-700 mb-2">
+                        Укажите вес для каждого размера. Цена пересчитается автоматически.
+                      </Text>
+                      <div className="grid grid-cols-4 gap-2">
+                        {selectedSizes.map((size) => {
+                          const weightMap = formData.weight_by_size 
+                            ? JSON.parse(formData.weight_by_size || "{}") 
+                            : {}
+                          return (
+                            <div key={size} className="flex items-center gap-1">
+                              <span className="text-xs font-medium w-8">{size}:</span>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                placeholder="г"
+                                className="h-7 text-xs"
+                                value={weightMap[size] || ""}
+                                onChange={(e) => {
+                                  const newMap = { ...weightMap, [size]: e.target.value }
+                                  handleInputChange("weight_by_size", JSON.stringify(newMap))
+                                }}
+                              />
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
               {showChainLength && (
-                <div>
-                  <Label>Длина цепочки/браслета (см)</Label>
-                  <div className="flex flex-wrap gap-2">
-                    {CHAIN_LENGTHS.map((len) => (
-                      <button
-                        key={len}
-                        type="button"
-                        onClick={() => handleInputChange("chain_length", len)}
-                        className={`
-                          px-3 py-1.5 rounded-md text-sm font-medium transition-colors
-                          ${formData.chain_length === len
-                            ? "bg-amber-500 text-white"
-                            : "bg-ui-bg-subtle text-ui-fg-subtle hover:bg-ui-bg-subtle-hover"
-                          }
-                        `}
-                      >
-                        {len} см
-                      </button>
-                    ))}
+                <>
+                  <div>
+                    <Label>Длина цепочки/браслета (см)</Label>
+                    <div className="flex flex-wrap gap-2">
+                      {CHAIN_LENGTHS.map((len) => (
+                        <button
+                          key={len}
+                          type="button"
+                          onClick={() => handleInputChange("chain_length", len)}
+                          className={`
+                            px-3 py-1.5 rounded-md text-sm font-medium transition-colors
+                            ${formData.chain_length === len
+                              ? "bg-amber-500 text-white"
+                              : "bg-ui-bg-subtle text-ui-fg-subtle hover:bg-ui-bg-subtle-hover"
+                            }
+                          `}
+                        >
+                          {len} см
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                  
+                  {/* Плетение для цепочек */}
+                  {(formData.product_type === "chain" || formData.product_type === "necklace") && (
+                    <div>
+                      <Label>Тип плетения</Label>
+                      <Select
+                        value={formData.chain_weave || ""}
+                        onValueChange={(v) => handleInputChange("chain_weave", v)}
+                      >
+                        <Select.Trigger>
+                          <Select.Value placeholder="Выберите плетение" />
+                        </Select.Trigger>
+                        <Select.Content>
+                          {CHAIN_WEAVE_OPTIONS.map((opt) => (
+                            <Select.Item key={opt.value} value={opt.value}>
+                              {opt.label}
+                            </Select.Item>
+                          ))}
+                        </Select.Content>
+                      </Select>
+                    </div>
+                  )}
+                  
+                  {/* Звенья для браслетов */}
+                  {formData.product_type === "bracelet" && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label>Количество звеньев</Label>
+                        <Input
+                          type="number"
+                          placeholder="18"
+                          value={formData.bracelet_links}
+                          onChange={(e) => handleInputChange("bracelet_links", e.target.value)}
+                        />
+                        <Text className="text-ui-fg-muted text-xs mt-1">
+                          Базовое кол-во звеньев
+                        </Text>
+                      </div>
+                      <div>
+                        <Label>Вес одного звена (г)</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          placeholder="0.5"
+                          value={formData.link_weight}
+                          onChange={(e) => handleInputChange("link_weight", e.target.value)}
+                        />
+                        <Text className="text-ui-fg-muted text-xs mt-1">
+                          Для пересчёта при добавлении
+                        </Text>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
 
               {showEarringDimensions && (
