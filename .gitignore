@@ -1,0 +1,55 @@
+# Dependencies
+node_modules/
+
+# Build
+dist/
+build/
+.cache/
+.medusa/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Uploads & media (root only)
+/uploads/
+/static/
+
+# Bitrix export (heavy files)
+bitrix-export/
+
+# IDE
+.idea/
+.vscode/
+.windsurf/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+yarn-error.log
+
+# TypeScript
+tsconfig.tsbuildinfo
+
+# Coverage
+coverage/
+
+# Database dumps
+*.sql
+
+# Yarn
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+
+# Misc
+Caddyfile
+tasks.md
+._*

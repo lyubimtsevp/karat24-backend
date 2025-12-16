@@ -1,0 +1,57 @@
+services:
+    acw8cogkgwgkoow8sgcso488-122451872287:
+        image: 'acw8cogkgwgkoow8sgcso488:e87cf6eb0cea4cb48453146ee1574e2853f05647'
+        container_name: acw8cogkgwgkoow8sgcso488-122451872287
+        restart: unless-stopped
+        expose:
+            - '9000'
+        networks:
+            coolify:
+                aliases:
+                    - acw8cogkgwgkoow8sgcso488-122451872287
+        mem_limit: '0'
+        memswap_limit: '0'
+        mem_swappiness: 60
+        mem_reservation: '0'
+        cpus: 0.0
+        cpu_shares: 1024
+        env_file:
+            - .env
+        labels:
+            - traefik.enable=true
+            - traefik.http.middlewares.gzip.compress=true
+            - traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https
+            - traefik.http.routers.http-0-acw8cogkgwgkoow8sgcso488.entryPoints=http
+            - traefik.http.routers.http-0-acw8cogkgwgkoow8sgcso488.middlewares=redirect-to-https
+            - 'traefik.http.routers.http-0-acw8cogkgwgkoow8sgcso488.rule=Host(`app.dewpanelrc.ru`) && PathPrefix(`/`)'
+            - traefik.http.routers.http-0-acw8cogkgwgkoow8sgcso488.service=http-0-acw8cogkgwgkoow8sgcso488
+            - traefik.http.routers.https-0-acw8cogkgwgkoow8sgcso488.entryPoints=https
+            - traefik.http.routers.https-0-acw8cogkgwgkoow8sgcso488.middlewares=gzip
+            - 'traefik.http.routers.https-0-acw8cogkgwgkoow8sgcso488.rule=Host(`app.dewpanelrc.ru`) && PathPrefix(`/`)'
+            - traefik.http.routers.https-0-acw8cogkgwgkoow8sgcso488.service=https-0-acw8cogkgwgkoow8sgcso488
+            - traefik.http.routers.https-0-acw8cogkgwgkoow8sgcso488.tls.certresolver=letsencrypt
+            - traefik.http.routers.https-0-acw8cogkgwgkoow8sgcso488.tls=true
+            - traefik.http.services.http-0-acw8cogkgwgkoow8sgcso488.loadbalancer.server.port=9000
+            - traefik.http.services.https-0-acw8cogkgwgkoow8sgcso488.loadbalancer.server.port=9000
+            - 'caddy_0.encode=zstd gzip'
+            - 'caddy_0.handle_path.0_reverse_proxy={{upstreams 9000}}'
+            - 'caddy_0.handle_path=/*'
+            - caddy_0.header=-Server
+            - 'caddy_0.try_files={path} /index.html /index.php'
+            - 'caddy_0=https://app.dewpanelrc.ru'
+            - caddy_ingress_network=coolify
+            - coolify.managed=true
+            - coolify.version=4.0.0-beta.432
+            - coolify.applicationId=3
+            - coolify.type=application
+            - coolify.name=acw8cogkgwgkoow8sgcso488
+            - coolify.resourceName=micelloplutarhkarat-24-backendmain-acw8cogkgwgkoow8sgcso488
+            - coolify.projectName=karat-24
+            - coolify.serviceName=micelloplutarhkarat-24-backendmain-acw8cogkgwgkoow8sgcso488
+            - coolify.environmentName=backend
+            - coolify.pullRequestId=0
+networks:
+    coolify:
+        external: true
+        name: coolify
+        attachable: true
